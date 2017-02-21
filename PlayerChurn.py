@@ -11,8 +11,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from time import strftime, localtime
 from timeit import default_timer as timer
-from sklearn.model_selection import KFold
 from hyperopt import fmin, tpe, hp, Trials
+from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import log_loss, roc_auc_score
 from sklearn.ensemble import GradientBoostingClassifier as GBC
 
@@ -58,8 +58,8 @@ def cv_gb_perf(hyperpars):
     cv_auc_test = []
     cv_losses_train = []
     cv_losses_test = []
-    cv = KFold(n_splits=nfolds, shuffle=True)
-    for train_index, test_index in cv.split(dt_train_all):
+    cv = StratifiedKFold(n_splits=nfolds, shuffle=True)
+    for train_index, test_index in cv.split(X=dt_train_all[factor_cols].values, y=Y_train_all[0].values):
         dt_train = dt_train_all.iloc[train_index,:]
         dt_test = dt_train_all.iloc[test_index,:]
         X_train = dt_train[factor_cols].values
@@ -95,16 +95,16 @@ def obj_loss(hyperpars):
 
 if sv_tunes_fname is None:
     hp_space = {
-       'ntrees': hp.quniform('ntrees', 200, 500, 100),
+       'ntrees': hp.quniform('ntrees', 300, 500, 10),
        'eta': hp.qloguniform('eta', np.log(0.01), np.log(0.1), 0.001),
        'max_depth': hp.quniform('max_depth', 2, 6, 1),
-       'min_samples_split': hp.quniform('min_samples_split', 2, 16, 1),
-       'min_samples_leaf': hp.quniform('min_samples_leaf', 1, 10, 1),
-       'subsample': hp.quniform('subsample', 0.5, 0.9, 0.001)
+       'min_samples_split': hp.quniform('min_samples_split', 5, 20, 1),
+       'min_samples_leaf': hp.quniform('min_samples_leaf', 5, 20, 1),
+       'subsample': hp.quniform('subsample', 0.5, 0.8, 0.001)
     }
     trials = Trials()
     beg = timer()
-    GB_tune = fmin(fn=obj_loss, space=hp_space, algo=tpe.suggest, trials=trials, max_evals=300)
+    GB_tune = fmin(fn=obj_loss, space=hp_space, algo=tpe.suggest, trials=trials, max_evals=2000)
     tm_spent = timer() - beg
     print 'Time elapsed: ' + str(round(tm_spent,2)) + ' sec\nBest found hyperparameters:'
     print str(GB_tune) + '\n'
@@ -128,8 +128,8 @@ beg = timer()
 print 'Performing final CV'
 for i in range(nreps):
     print 'Repeat ' + str(i+1) + ' of ' + str(nreps)
-    cv = KFold(n_splits=nfolds, shuffle=True)
-    for train_index, test_index in cv.split(dt_train_all):
+    cv = StratifiedKFold(n_splits=nfolds, shuffle=True)
+    for train_index, test_index in cv.split(X=dt_train_all[factor_cols].values, y=Y_train_all[0].values):
         dt_train = dt_train_all.iloc[train_index,:]
         dt_test = dt_train_all.iloc[test_index,:]
         X_train = dt_train[factor_cols].values
@@ -169,10 +169,15 @@ clf = GBC(learning_rate=eta, n_estimators=best_ntrees, subsample=subsample, max_
           min_samples_split=min_samples_split, min_samples_leaf=min_samples_leaf, random_state=0)
 
 clf.fit(X=dt_train_all[factor_cols].values, y=dt_train_all[trgt_col].values)
-Y_test_fcs = clf.predict_proba(X=X_test_all.values)[:,int(np.where(clf.classes_==1)[0])]
-np.savetxt(fname='answer_'+strftime("%d%m%Y%H%M%S", localtime())+'.txt', X=Y_test_fcs, newline='\n')
+pos_cl_ind = int(np.where(clf.classes_==1)[0])
 
+Y_train_fcs = clf.predict_proba(X=dt_train_all[factor_cols].values)[:,pos_cl_ind]
+Y_test_fcs = clf.predict_proba(X=X_test_all.values)[:,pos_cl_ind]
+np.savetxt(fname='answerGB_'+strftime("%d%m%Y%H%M%S", localtime())+'.txt', X=Y_test_fcs, newline='\n')
 
+# To use in further ensembling
+pd.DataFrame({'GB_PROB': Y_train_fcs}).to_csv('GB_fcs_train.csv', index=False)
+pd.DataFrame({'GB_PROB': Y_test_fcs}).to_csv('GB_fcs_test.csv', index=False)
 
 
 
